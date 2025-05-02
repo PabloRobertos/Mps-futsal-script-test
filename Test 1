@@ -1,0 +1,381 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+local DebugPing = ReplicatedStorage:WaitForChild("PlayerData"):WaitForChild(LocalPlayer.UserId).Settings.Misc.Debug.PingDebug
+
+repeat
+    RunService.RenderStepped:Wait()
+until PlayerGui:FindFirstChild("Start")
+local DeclineButton = PlayerGui:WaitForChild("Start"):WaitForChild("Decline")
+
+repeat
+    RunService.RenderStepped:Wait()
+until LocalPlayer:FindFirstChild("Stats")
+local PingStat = LocalPlayer:WaitForChild("Stats"):WaitForChild("Ping")
+local Camera = workspace.CurrentCamera
+PlayerScripts:WaitForChild("TSFL Client")
+local Assets = ReplicatedStorage:WaitForChild("Assets")
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Forces = Assets:WaitForChild("Forces")
+local RightOutsideCurve = Forces:WaitForChild("OutsideCurveR")
+local LeftOutsideCurve = Forces:WaitForChild("OutsideCurveL")
+local RightInsideCurve = Forces:WaitForChild("InsideCurveR")
+local LeftInsideCurve = Forces:WaitForChild("InsideCurveL")
+local RightKnuckle = Forces:WaitForChild("Knuckle")
+local LeftKnuckle = Forces:WaitForChild("KnuckleL")
+local CharacterHandler = require(script.Parent.CharacterHandler)
+local RemoteHandler = require(Modules.RemoteHandler)
+local Physics = {}
+local ColorMeta = {__index = Color3}
+
+local ColorUtils = setmetatable({
+    FromHex = function(hex)
+        if string.sub(hex, 1, 1) == "#" then
+            hex = "0x" .. string.sub(hex, 2, string.len(hex))
+        elseif string.lower(string.sub(hex, 1, 2)) ~= "0x" then
+            hex = "0x" .. hex
+        end
+        return Color3.fromRGB(math.floor(hex / 65536) % 256, math.floor(hex / 256) % 256, math.floor(hex) % 256)
+    end,
+    ToHex = function(color)
+        return string.format("%02X", color.r * 255) .. string.format("%02X", color.g * 255) .. string.format("%02X", color.b * 255)
+    end
+}, ColorMeta)
+
+function Physics.TweenObject(object, duration, style, direction, repeatCount, reverse, delay, properties)
+    local tween = TweenService:Create(object, TweenInfo.new(duration, Enum.EasingStyle[style].Value, Enum.EasingDirection[direction].Value, repeatCount, reverse, delay), properties)
+    tween:Play()
+    coroutine.wrap(function()
+        tween.Completed:Wait()
+        tween:Destroy()
+    end)()
+end
+
+function Physics.ShowDeclineMessage()
+    if DebugPing.Value then
+        DeclineButton.TextColor3 = ColorUtils.fromRGB(255, 0, 0)
+        DeclineButton.TextTransparency = 0
+        Physics:TweenObject(DeclineButton, 1, "Quad", "In", 0, false, 0, {TextTransparency = 1})
+    end
+end
+
+function Physics.IsShielded(target)
+    return target and target.Parent and target.Parent:IsA("Model") and target.Parent.Name ~= LocalPlayer.Name and target.Name ~= "Right Arm" and target.Name ~= "Left Arm" and target.Parent:FindFirstChild("Humanoid") and true or false
+end
+
+function Physics.IsTooFar(target)
+    return ((CharacterHandler.HumanoidRootPart.Position - target.Position) * Vector3.new(1, 0, 1)).Magnitude > 20
+end
+
+function Physics.FindClosestBall(maxDistance)
+    local closestBall = nil
+    for _, ball in pairs(workspace.Balls:GetChildren()) do
+        if ball.Name == "TPS" then
+            if closestBall then
+                if (closestBall.Position - CharacterHandler.Torso.Position).Magnitude > (ball.Position - CharacterHandler.Torso.Position).Magnitude then
+                    closestBall = ball
+                end
+            else
+                closestBall = ball
+            end
+        end
+    end
+    if closestBall and (closestBall.Position - CharacterHandler.Torso.Position).Magnitude <= maxDistance then
+        return closestBall
+    end
+end
+
+function Physics.AddVelocity(velocity, speed, maxForce, parent, duration)
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.Velocity = velocity * speed
+    bodyVelocity.MaxForce = maxForce
+    bodyVelocity.Parent = parent
+    Debris:AddItem(bodyVelocity, duration)
+    return bodyVelocity
+end
+
+function Physics.AddForce(force, parent, duration)
+    local bodyForce = Instance.new("BodyForce")
+    bodyForce.Force = force
+    bodyForce.Parent = parent
+    Debris:AddItem(bodyForce, duration)
+end
+
+function Physics.AddPosition(maxForce, position, parent, duration)
+    local bodyPosition = Instance.new("BodyPosition")
+    bodyPosition.MaxForce = maxForce
+    bodyPosition.Position = position
+    bodyPosition.Parent = parent
+    Debris:AddItem(bodyPosition, duration)
+end
+
+function Physics.AddAngularVelocity(angularVelocity, maxTorque, parent, duration)
+    local bodyAngularVelocity = Instance.new("BodyAngularVelocity")
+    bodyAngularVelocity.AngularVelocity = angularVelocity
+    bodyAngularVelocity.MaxTorque = maxTorque
+    bodyAngularVelocity.Parent = parent
+    Debris:AddItem(bodyAngularVelocity, duration)
+end
+
+function Physics.AddTorque(torque, attachment, parent, duration)
+    local torqueInstance = Instance.new("Torque")
+    torqueInstance.RelativeTo = Enum.ActuatorRelativeTo.World
+    torqueInstance.Torque = torque
+    torqueInstance.Attachment0 = attachment
+    torqueInstance.Parent = parent
+    Debris:AddItem(torqueInstance, duration)
+end
+
+function Physics.RemoveVelocity(ball)
+    if ball.Owner.Value == LocalPlayer then
+        for _, child in pairs(ball:GetChildren()) do
+            if child.Name == "BodyVelocity" or child.Name == "BodyAngularVelocity" or child.Name == "BodyForce" or child.Name == "Torque" or child.Name == "InsideCurveR" or child.Name == "InsideCurveL" or child.Name == "OutsideCurveR" or child.Name == "OutsideCurveL" or child.Name == "Knuckle" or child.Name == "KnuckleL" then
+                child:Destroy()
+            end
+        end
+    elseif (ball.Server.Value and ball.Velocity.Magnitude >= 60 or not ball.Server.Value) and PingStat.Value ~= "MAX_PING" and ball.Owner.Value ~= LocalPlayer then
+        RemoteHandler.BallNetworking():FireServer("BodyVelocityRemove", {ball})
+    end
+end
+
+function Physics.SetBallProperties(ball, rotVelocity, velocity)
+    if rotVelocity then
+        ball.RotVelocity = rotVelocity
+    end
+    if velocity then
+        ball.Velocity = velocity
+    end
+    RemoteHandler.BallNetworking():FireServer("ApplyBallProperties", {ball, rotVelocity, velocity})
+end
+
+function Physics.CheckHitbox(ball)
+    coroutine.wrap(function()
+        if ball.Size.Magnitude > 4.3301272392273 or (CharacterHandler.RightArm and CharacterHandler.RightArm.Size.Magnitude > 2.4494898319245) or (CharacterHandler.LeftArm and CharacterHandler.LeftArm.Size.Magnitude > 2.4494898319245) or (CharacterHandler.Torso and CharacterHandler.Torso.Size.Magnitude > 3) or (CharacterHandler.RightLeg and CharacterHandler.RightLeg.Size.Magnitude > 2.4494898319245) or (CharacterHandler.LeftLeg and CharacterHandler.LeftLeg.Size.Magnitude > 2.4494898319245) then
+            RemoteHandler.BallNetworking():FireServer("EnlargedHitbox")
+        end
+    end)()
+end
+
+function Physics.IsBallInHitbox(ball, hitbox)
+    local overlapParams = OverlapParams.new()
+    overlapParams.FilterType = Enum.RaycastFilterType.Include
+    overlapParams.FilterDescendantsInstances = {ball}
+    return #workspace:GetPartBoundsInBox(hitbox.CFrame, hitbox.Size, overlapParams) >= 1 or (ball.Position - hitbox.Position).Magnitude < 4
+end
+
+function Physics.ApplyForce(self, speed, ball, velocity, maxForce, duration, isAnkle, isKick, isGoalkeeper, position)
+    if ball then
+        self:CheckHitbox(ball)
+        local timestamp = workspace:GetServerTimeNow()
+        if isKick then
+            if ball.Owner.Value == LocalPlayer then
+                RemoteHandler.HitNetworking():FireServer(timestamp, timestamp, ball.Position)
+                self:AddVelocity(velocity, speed, maxForce, ball, duration)
+            else
+                RemoteHandler.HitNetworking():FireServer(timestamp, timestamp, ball.Position)
+                RemoteHandler.BallNetworking():FireServer("NetworkOwnership_GK", {ball, speed, velocity, maxForce, duration, isAnkle, isGoalkeeper, position})
+            end
+        end
+        if isAnkle or isKick then
+            if isAnkle and not isKick then
+                if ball.Owner.Value == LocalPlayer then
+                    RemoteHandler.HitNetworking():FireServer(timestamp, timestamp, ball.Position)
+                    self:AddVelocity(velocity, speed, maxForce, ball, duration)
+                    if isGoalkeeper then
+                        RemoteHandler.BallNetworking():FireServer("Hit/Ankle", {ball})
+                        return
+                    end
+                else
+                    if ball.Owner.Value ~= LocalPlayer and (ball.Server.Value and ball.Velocity.Magnitude >= 60 or not ball.Server.Value) and PingStat.Value ~= "MAX_PING" then
+                        RemoteHandler.HitNetworking():FireServer(timestamp, timestamp, ball.Position)
+                        self:CheckHitbox(ball)
+                        RemoteHandler.BallNetworking():FireServer("NetworkOwnership", {ball, speed, velocity, maxForce, duration, isGoalkeeper, position})
+                        return
+                    end
+                    if ball.Owner.Value ~= LocalPlayer and (ball.Server.Value and ball.Velocity.Magnitude >= 60 or not ball.Server.Value) and PingStat.Value == "MAX_PING" then
+                        self.ShowDeclineMessage()
+                        return
+                    end
+                end
+            end
+        else
+            if self:IsTooFar(ball) then
+                return
+            end
+            if ball.Owner.Value == LocalPlayer then
+                RemoteHandler.HitNetworking():FireServer(timestamp, timestamp, ball.Position)
+                self:AddVelocity(velocity, speed, maxForce, ball, duration)
+                if isGoalkeeper then
+                    RemoteHandler.BallNetworking():FireServer("Hit/Ankle", {ball})
+                    return
+                end
+            else
+                if ball.Owner.Value ~= LocalPlayer and (ball.Server.Value and ball.Velocity.Magnitude >= 60 or not ball.Server.Value) and PingStat.Value ~= "MAX_PING" then
+                    RemoteHandler.HitNetworking():FireServer(timestamp, timestamp, ball.Position)
+                    self:CheckHitbox(ball)
+                    RemoteHandler.BallNetworking():FireServer("NetworkOwnership", {ball, speed, velocity, maxForce, duration, isGoalkeeper, position})
+                    return
+                end
+                if ball.Owner.Value ~= LocalPlayer and (ball.Server.Value and ball.Velocity.Magnitude >= 60 or not ball.Server.Value) and PingStat.Value == "MAX_PING" then
+                    self.ShowDeclineMessage()
+                    return
+                end
+            end
+        end
+    end
+end
+
+function Physics.SecondTouch(self, speed, ball, velocity, maxForce, duration)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddVelocity(velocity, speed, maxForce, ball, duration)
+    elseif ball.Owner.Value == LocalPlayer or PingStat.Value == "MAX_PING" then
+        if ball.Owner.Value ~= LocalPlayer and PingStat.Value == "MAX_PING" then
+            self.ShowDeclineMessage()
+        end
+    else
+        self:CheckHitbox(ball)
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnership_2nd", {ball, speed, velocity, maxForce, duration, ball.Position})
+    end
+end
+
+function Physics.SetPosition(self, ball, maxForce, position, duration)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddPosition(maxForce, position, ball, duration)
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipBP", {ball, maxForce, position, duration})
+    end
+end
+
+function Physics.SetAngularVelocity(self, ball, angularVelocity, maxTorque, duration)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddAngularVelocity(angularVelocity, maxTorque, ball, duration)
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, angularVelocity, maxTorque, duration})
+    end
+end
+
+function Physics.SetBodyForce(self, ball, force, duration)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddForce(force, ball, duration)
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipBF", {ball, force, duration})
+    end
+end
+
+function Physics.SetTorque(self, ball, torque, attachment, parent, duration)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddTorque(torque, attachment, parent, ball, duration)
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("ApplyTorque", {torque, attachment, parent, ball, duration})
+    end
+end
+
+function Physics.ApplyRightOutsideCurve(self, ball)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddAngularVelocity(Vector3.new(0, 50, 0), Vector3.new(0, 5000, 0), ball, 0.5)
+        local curve = RightOutsideCurve:Clone()
+        curve.Parent = ball
+        curve:WaitForChild("Script").Disabled = false
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, 50, 0), Vector3.new(0, 5000, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("OutsideCurveR", {ball})
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, 50, 0), Vector3.new(0, 5000, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("OutsideCurveR", {ball})
+    end
+end
+
+function Physics.ApplyLeftOutsideCurve(self, ball)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddAngularVelocity(Vector3.new(0, 50, 0), Vector3.new(0, 5000, 0), ball, 0.5)
+        local curve = LeftOutsideCurve:Clone()
+        curve.Parent = ball
+        curve:WaitForChild("Script").Disabled = false
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, 50, 0), Vector3.new(0, 500, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("OutsideCurveL", {ball})
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, 50, 0), Vector3.new(0, 500, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("OutsideCurveL", {ball})
+    end
+end
+
+function Physics.ApplyRightInsideCurve(self, ball)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddAngularVelocity(Vector3.new(0, -50, 0), Vector3.new(0, 5000, 0), ball, 0.5)
+        local curve = RightInsideCurve:Clone()
+        curve.Parent = ball
+        curve:WaitForChild("Script").Disabled = false
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, -50, 0), Vector3.new(0, 500, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("InsideCurveR", {ball})
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, -50, 0), Vector3.new(0, 500, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("InsideCurveR", {ball})
+    end
+end
+
+function Physics.ApplyLeftInsideCurve(self, ball)
+    if ball.Owner.Value == LocalPlayer then
+        self:AddAngularVelocity(Vector3.new(0, -50, 0), Vector3.new(0, 5000, 0), ball, 0.5)
+        local curve = LeftInsideCurve:Clone()
+        curve.Parent = ball
+        curve:WaitForChild("Script").Disabled = false
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, -50, 0), Vector3.new(0, 500, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("InsideCurveL", {ball})
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("NetworkOwnershipAV", {ball, Vector3.new(0, -50, 0), Vector3.new(0, 500, 0), 0.5})
+        RemoteHandler.BallNetworking():FireServer("InsideCurveL", {ball})
+    end
+end
+
+function Physics.ApplyRightKnuckle(self, ball)
+    if ball.Owner.Value == LocalPlayer then
+        local knuckle = RightKnuckle:Clone()
+        knuckle.Parent = ball
+        knuckle:WaitForChild("Script").Disabled = false
+        RemoteHandler.BallNetworking():FireServer("KnuckleR", {ball})
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("KnuckleR", {ball})
+    end
+end
+
+function Physics.ApplyLeftKnuckle(self, ball)
+    if ball.Owner.Value == LocalPlayer then
+        local knuckle = LeftKnuckle:Clone()
+        knuckle.Parent = ball
+        knuckle:WaitForChild("Script").Disabled = false
+        RemoteHandler.BallNetworking():FireServer("KnuckleL", {ball})
+    elseif ball.Owner.Value ~= LocalPlayer and PingStat.Value ~= "MAX_PING" then
+        RemoteHandler.BallNetworking():FireServer("KnuckleL", {ball})
+    end
+end
+
+RemoteHandler.BallNetworking().OnClientEvent:Connect(function(event, data)
+    if event == "RemoveForces" then
+        for _, child in pairs(data[1]:GetChildren()) do
+            if child.Name == "InsideCurveR" or child.Name == "InsideCurveL" or child.Name == "OutsideCurveR" or child.Name == "OutsideCurveL" or child.Name == "Knuckle" or child.Name == "KnuckleL" then
+                child:Destroy()
+            end
+        end
+    elseif event == "HitCheck" then
+        if data[1].Parent == workspace.Balls and data[1].Hit.Value == false then
+            data[1].Hit.Value = true
+            wait(0.1)
+            if data[1].Parent == workspace.Balls then
+                data[1].Hit.Value = false
+            end
+        end
+    elseif event == "AnkleCheck" and data[1].Parent == workspace.Balls and data[1].Hit.Ankle.Value == false then
+        data[1].Hit.Ankle.Value = true
+        wait(0.3)
+        if data[1].Parent == workspace.Balls then
+            data[1].Hit.Ankle.Value = false
+        end
+    end
+end)
+
+RemoteHandler.Decline().OnClientInvoke = Physics.ShowDeclineMessage
+return Physics
