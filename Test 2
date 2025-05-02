@@ -1,0 +1,106 @@
+wait(1)
+local HopperBin = Instance.new("HopperBin", nil)
+script.Parent = HopperBin
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local StarterGui = game:GetService("StarterGui")
+local TextService = game:GetService("TextService")
+local RunService = game:GetService("RunService")
+TextService.Name = "CoreGui"
+local LocalPlayer = Players.LocalPlayer
+LocalPlayer:WaitForChild("PlayerGui")
+local PlayerScripts = LocalPlayer:WaitForChild("PlayerScripts")
+local TextChatService = game:GetService("TextChatService")
+local ClientModules = PlayerScripts:WaitForChild("TSFL Client"):WaitForChild("Modules")
+local ServerModules = ReplicatedStorage:WaitForChild("Modules")
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local GeneralChannel = TextChatService:WaitForChild("TextChannels"):WaitForChild("RBXGeneral")
+local RemoteHandler = require(ServerModules:WaitForChild("RemoteHandler"))
+
+repeat
+    RunService.RenderStepped:Wait()
+until ServerModules
+
+Remotes.Changed:Connect(function()
+    RemoteHandler.BallNetworking():FireServer("Modify_Remotes")
+end)
+
+for _, remote in pairs(Remotes:GetChildren()) do
+    remote:GetPropertyChangedSignal("Parent"):Connect(function()
+        if Remotes and remote.Parent ~= Remotes or not Remotes then
+            RemoteHandler.BallNetworking():FireServer("Modify_Remotes")
+        end
+    end)
+end
+
+RemoteHandler.BallNetworking().OnClientEvent:Connect(function(event, data)
+    if event == "MedalAward" then
+        StarterGui:SetCore("SendNotification", {
+            Title = "Medal Award",
+            Text = "You have won " .. data[1] .. " Medals for winning the game",
+            Duration = 5,
+            Icon = "rbxassetid://8124224585"
+        })
+    elseif event == "Custom" then
+        local message = data[1]
+        local color = data[2] or Color3.fromRGB(0, 0, 255)
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#%02X%02X%02X'>"):format(color.R * 255, color.G * 255, color.B * 255) .. message .. "</font></b>")
+    elseif event == "ResetCooldown" then
+        StarterGui:SetCore("ResetButtonCallback", false)
+        task.wait(math.max(data[1] - workspace:GetServerTimeNow(), 0))
+        StarterGui:SetCore("ResetButtonCallback", true)
+    elseif event == "Exploiting_Ball" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for exploiting the ball!</font></b>"):format(data[1].Name))
+    elseif event == "Enlarged_Hitbox" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for enlarging their hitbox!</font></b>"):format(data[1].Name))
+    elseif event == "Deleting" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for exploiting with Instances!</font></b>"):format(data[1].Name))
+    elseif event == "Auto_Hit" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been suspected of using Auto Hit!</font></b>"):format(data[1].Name))
+    elseif event == "Auto_Catch_Suspect" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been suspected of using Auto Catch!</font></b>"):format(data[1].Name))
+    elseif event == "High_WalkSpeed" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has a higher walk speed than default!</font></b>"):format(data[1].Name))
+    elseif event == "Script_Executer" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for using a Script Executer!</font></b>"):format(data[1].Name))
+    elseif event == "Modify_Remotes" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for modifying Remotes!</font></b>"):format(data[1].Name))
+    elseif event == "RemoteExploit" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for exploiting Remotes!</font></b>"):format(data[1].Name))
+    elseif event == "Shop_Exploit" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for exploiting the shop!</font></b>"):format(data[1].Name))
+    elseif event == "No_Clip" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for exploiting with no clip!</font></b>"):format(data[1].Name))
+    elseif event == "Instances" then
+        GeneralChannel:DisplaySystemMessage(("<b><font color='#FF0000'>[Deglution] %s has been kicked for creating un-wanted instances!</font></b>"):format(data[1].Name))
+    end
+end)
+
+task.spawn(function()
+    local CharacterHandler = require(ClientModules.CharacterHandler)
+    task.spawn(function()
+        local connections = {}
+        LocalPlayer.CharacterAdded:Connect(function(character)
+            local humanoid = character:WaitForChild("Humanoid")
+            connections[1] = humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+                if not CharacterHandler:GetDived() and humanoid.WalkSpeed > 20 then
+                    RemoteHandler.BallNetworking():FireServer("High_WalkSpeed")
+                end
+            end)
+        end)
+        LocalPlayer.CharacterRemoving:Connect(function()
+            for _, connection in pairs(connections) do
+                connection:Disconnect()
+            end
+            table.clear(connections)
+        end)
+    end)
+    task.spawn(function()
+        while true do
+            repeat
+                task.wait()
+            until CharacterHandler.Humanoid and not CharacterHandler:GetDived() and CharacterHandler.Humanoid.WalkSpeed > 20
+            RemoteHandler.BallNetworking():FireServer("High_WalkSpeed")
+        end
+    end)
+end)
